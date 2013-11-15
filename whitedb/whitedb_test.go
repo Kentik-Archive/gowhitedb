@@ -94,7 +94,7 @@ func TestRecordSet(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := rec.SetByteField(db, 4, []byte("Test")); err != nil {
+	if err := rec.SetBytesField(db, 4, []byte("Test")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -159,7 +159,68 @@ func TestFloat64GetSet(t *testing.T) {
 	}
 }
 
-func TestByteGetSet(t *testing.T) {
+func TestSeek(t *testing.T) {
+	whitedb.DeleteDatabase(DB_NAME)
+	db, err := whitedb.AttachDatabase(DB_NAME, DB_SIZE)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.DetatchDatabase()
+	vals := [][]byte{[]byte("dsfsdf"), []byte("234234sdfsdf"), []byte("sdfsdfsdfsdf")}
+
+	for i, v := range vals {
+		rec, err := db.CreateRecord(2)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		if err := rec.SetInt64Field(db, 0, int64(i)); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := rec.SetBytesField(db, 1, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Seek all
+	count := 0
+	rec, err := db.GetFirstRecord()
+	for err == nil {
+		count++
+		rec, err = db.GetNextRecord(rec)
+	}
+
+	if count != len(vals) {
+		t.Errorf("Execting %d, got %d", len(vals), count)
+	}
+
+	// Test out search
+	count = 0
+	rec, err = db.FindRecordInt(0, whitedb.EQUAL, 0, nil)
+	for err == nil {
+		count++
+		rec, err = db.FindRecordInt(0, whitedb.EQUAL, 0, rec)
+	}
+
+	if count != 1 {
+		t.Errorf("Execting %d, got %d", 1, count)
+	}
+
+	// Test out search ([]byte)
+	count = 0
+	rec, err = db.FindRecordBytes(1, whitedb.EQUAL, vals[2], nil)
+	for err == nil {
+		count++
+		rec, err = db.FindRecordBytes(1, whitedb.EQUAL, vals[2], rec)
+	}
+
+	if count != 1 {
+		t.Errorf("Execting %d, got %d", 1, count)
+	}
+}
+
+func TestBytesGetSet(t *testing.T) {
 	db, err := whitedb.AttachDatabase(DB_NAME, DB_SIZE)
 	if err != nil {
 		t.Fatal(err)
@@ -173,18 +234,74 @@ func TestByteGetSet(t *testing.T) {
 	}
 
 	for i, v := range vals {
-		if err := rec.SetByteField(db, uint16(i), v); err != nil {
+		if err := rec.SetBytesField(db, uint16(i), v); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	for i, v := range vals {
-		if vsave, err := rec.GetByteField(db, uint16(i)); err != nil {
+		if vsave, err := rec.GetBytesField(db, uint16(i)); err != nil {
 			t.Fatal(err)
 		} else if string(v) != string(vsave) {
 			t.Errorf("Execting %s, got %s", string(v), string(vsave))
 		}
 
+	}
+}
+
+// @TODO -- why can I not pass a pointer to a db into a new go routine?
+func TestTransactions(t *testing.T) {
+
+	whitedb.DeleteDatabase(DB_NAME)
+	db, err := whitedb.AttachDatabase(DB_NAME, DB_SIZE)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.DetatchDatabase()
+
+	// Make sure there's at least one record.
+	rec, err := db.CreateRecord(1)
+	rec.SetInt64Field(db, 0, 0)
+	done := make(chan bool, 0)
+	values := []int64{1, 2}
+
+	update := func(c int64) {
+		da, err := whitedb.AttachDatabase(DB_NAME, DB_SIZE)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer da.DetatchDatabase()
+
+		wlock := da.GetWriteLock()
+		r, _ := da.GetFirstRecord()
+		if r != nil {
+			val, _ := r.GetInt64Field(da, 0)
+			r.SetInt64Field(da, 0, c+val)
+		}
+		da.EndWriteLock(wlock)
+		done <- true
+	}
+
+	sum := int64(0)
+	for _, v := range values {
+		go update(v)
+		sum += v
+	}
+
+	c := 0
+	for _ = range done {
+		c++
+		if c >= 2 {
+			break
+		}
+	}
+
+	rlock := db.GetReadLock()
+	val, _ := rec.GetInt64Field(db, 0)
+	db.EndReadLock(rlock)
+
+	if val != 3 {
+		t.Errorf("Execting %s, got %s", sum, val)
 	}
 }
 
@@ -208,7 +325,7 @@ func BenchmarkIntSet(b *testing.B) {
 	whitedb.DeleteDatabase(DB_NAME)
 }
 
-func BenchmarkByteSet(b *testing.B) {
+func BenchmarkBytesSet(b *testing.B) {
 	db, err := whitedb.AttachDatabase(DB_NAME, DB_SIZE)
 	if err != nil {
 		b.Fatal(err)
@@ -219,7 +336,7 @@ func BenchmarkByteSet(b *testing.B) {
 		b.Fatal(err)
 	}
 	for i := 0; i < b.N; i++ {
-		if err := rec.SetByteField(db, 0, []byte("testa")); err != nil {
+		if err := rec.SetBytesField(db, 0, []byte("testa")); err != nil {
 			b.Fatal(err)
 		}
 	}

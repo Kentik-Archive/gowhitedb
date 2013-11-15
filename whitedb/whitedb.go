@@ -32,6 +32,22 @@ const (
 	TIMETYPE       = C.WG_TIMETYPE
 	ANONCONSTTYPE  = C.WG_ANONCONSTTYPE
 	VARTYPE        = C.WG_VARTYPE
+
+	ILLEGAL = C.WG_ILLEGAL
+
+	/* Query "arglist" parameters */
+	EQUAL     = C.WG_COND_EQUAL     /** = */
+	NOT_EQUAL = C.WG_COND_NOT_EQUAL /** != */
+	LESSTHAN  = C.WG_COND_LESSTHAN  /** < */
+	GREATER   = C.WG_COND_GREATER   /** > */
+	LTEQUAL   = C.WG_COND_LTEQUAL   /** <= */
+	GTEQUAL   = C.WG_COND_GTEQUAL   /** >= */
+
+	/* Query types. Python extension module uses the API and needs these. */
+	QTYPE_TTREE    = C.WG_QTYPE_TTREE
+	QTYPE_HASH     = C.WG_QTYPE_HASH
+	QTYPE_SCAN     = C.WG_QTYPE_SCAN
+	QTYPE_PREFETCH = C.WG_QTYPE_PREFETCH
 )
 
 // WDBError is used for errors using the whitedb library.  It implements the
@@ -43,7 +59,7 @@ func (err WDBError) Error() string {
 }
 
 // Wrapper for our db pointer
-type WhiteDB struct {
+type Db struct {
 	db unsafe.Pointer
 }
 
@@ -55,11 +71,11 @@ type Record struct {
 //// Work with Databases.
 
 // Attatches to a DB. Creates the db if it does not yet exist.
-func AttachDatabase(address string, size int) (*WhiteDB, error) {
+func AttachDatabase(address string, size int) (*Db, error) {
 	cAdr := C.CString(address)
 	defer C.free(unsafe.Pointer(cAdr))
 	cSiz := C.int(size)
-	d := &WhiteDB{db: C.wg_attach_database(cAdr, cSiz)}
+	d := &Db{db: C.wg_attach_database(cAdr, cSiz)}
 	if d.db == nil {
 		return nil, WDBError("Could not create database")
 	}
@@ -77,7 +93,7 @@ func DeleteDatabase(address string) error {
 }
 
 // Detatch the db from the current process but does not delete it.
-func (d *WhiteDB) DetatchDatabase() {
+func (d *Db) DetatchDatabase() {
 	if d.db != nil {
 		C.wg_detach_database(d.db)
 	}
@@ -86,7 +102,7 @@ func (d *WhiteDB) DetatchDatabase() {
 //// Generate/Delete/Find Records.
 
 // Generate a record.
-func (d *WhiteDB) CreateRecord(length int64) (*Record, error) {
+func (d *Db) CreateRecord(length int64) (*Record, error) {
 	r := &Record{rec: C.wg_create_record(d.db, C.wg_int(length))}
 	if r.rec == nil {
 		return nil, WDBError("Could not create record")
@@ -95,7 +111,7 @@ func (d *WhiteDB) CreateRecord(length int64) (*Record, error) {
 }
 
 // Same as above, but does not create index.
-func (d *WhiteDB) CreateRawRecord(length int64) (*Record, error) {
+func (d *Db) CreateRawRecord(length int64) (*Record, error) {
 	r := &Record{rec: C.wg_create_raw_record(d.db, C.wg_int(length))}
 	if r.rec == nil {
 		return nil, WDBError("Could not create record")
@@ -104,7 +120,7 @@ func (d *WhiteDB) CreateRawRecord(length int64) (*Record, error) {
 }
 
 // Removes the record.
-func (d *WhiteDB) DeleteRecord(r *Record) error {
+func (d *Db) DeleteRecord(r *Record) error {
 	if C.wg_delete_record(d.db, r.rec) != 0 {
 		return WDBError("Could not delete record")
 	}
@@ -112,7 +128,7 @@ func (d *WhiteDB) DeleteRecord(r *Record) error {
 }
 
 // Seeks to the first record in a db.
-func (d *WhiteDB) GetFirstRecord() (*Record, error) {
+func (d *Db) GetFirstRecord() (*Record, error) {
 	r := &Record{rec: C.wg_get_first_record(d.db)}
 	if r.rec == nil {
 		return nil, WDBError("Done With DB")
@@ -121,8 +137,37 @@ func (d *WhiteDB) GetFirstRecord() (*Record, error) {
 }
 
 // Increments to next record in the db.
-func (d *WhiteDB) GetNextRecord(r *Record) (*Record, error) {
+func (d *Db) GetNextRecord(r *Record) (*Record, error) {
 	nr := &Record{rec: C.wg_get_next_record(d.db, r.rec)}
+	if nr.rec == nil {
+		return nil, WDBError("Done With DB")
+	}
+	return nr, nil
+}
+
+//// Search for a given record
+func (d *Db) FindRecordInt(field uint16, condition uint16, data int, lr *Record) (*Record, error) {
+	nr := &Record{rec: nil}
+	if lr == nil {
+		nr.rec = C.wg_find_record_int(d.db, C.wg_int(field), C.wg_int(condition), C.int(data), nil)
+	} else {
+		nr.rec = C.wg_find_record_int(d.db, C.wg_int(field), C.wg_int(condition), C.int(data), lr.rec)
+	}
+
+	if nr.rec == nil {
+		return nil, WDBError("Done With DB")
+	}
+	return nr, nil
+}
+
+func (d *Db) FindRecordBytes(field uint16, condition uint16, data []byte, lr *Record) (*Record, error) {
+	nr := &Record{rec: nil}
+	if lr == nil {
+		nr.rec = C.wg_find_record_str(d.db, C.wg_int(field), C.wg_int(condition), (*C.char)(unsafe.Pointer(&data[0])), nil)
+	} else {
+		nr.rec = C.wg_find_record_str(d.db, C.wg_int(field), C.wg_int(condition), (*C.char)(unsafe.Pointer(&data[0])), lr.rec)
+	}
+
 	if nr.rec == nil {
 		return nil, WDBError("Done With DB")
 	}
@@ -132,15 +177,15 @@ func (d *WhiteDB) GetNextRecord(r *Record) (*Record, error) {
 //// Get set values in records.
 
 // Sets the already encoded value
-func (r *Record) SetField(d *WhiteDB, number uint16, data int64) error {
-	if C.wg_set_field(d.db, r.rec, C.wg_int(number), C.wg_int(data)) != 0 {
+func (r *Record) SetField(d *Db, field uint16, data int64) error {
+	if C.wg_set_field(d.db, r.rec, C.wg_int(field), C.wg_int(data)) != 0 {
 		return WDBError("Could not set field")
 	}
 	return nil
 }
 
 // Same as above, but errors if the field has been set before.
-func (r *Record) SetNewField(d *WhiteDB, number uint16, data int64) error {
+func (r *Record) SetNewField(d *Db, number uint16, data int64) error {
 	if C.wg_set_new_field(d.db, r.rec, C.wg_int(number), C.wg_int(data)) != 0 {
 		return WDBError("Could not set field")
 	}
@@ -148,7 +193,7 @@ func (r *Record) SetNewField(d *WhiteDB, number uint16, data int64) error {
 }
 
 // Convenience function, does the encoding for you.
-func (r *Record) SetInt64Field(d *WhiteDB, number uint16, data int64) error {
+func (r *Record) SetInt64Field(d *Db, number uint16, data int64) error {
 	if C.wg_set_int_field(d.db, r.rec, C.wg_int(number), C.wg_int(data)) != 0 {
 		return WDBError("Could not set field")
 	}
@@ -156,14 +201,14 @@ func (r *Record) SetInt64Field(d *WhiteDB, number uint16, data int64) error {
 }
 
 // Takes Doubles
-func (r *Record) SetFloat64Field(d *WhiteDB, number uint16, data float64) error {
+func (r *Record) SetFloat64Field(d *Db, number uint16, data float64) error {
 	if C.wg_set_double_field(d.db, r.rec, C.wg_int(number), C.double(data)) != 0 {
 		return WDBError("Could not set field")
 	}
 	return nil
 }
 
-func (r *Record) SetByteField(d *WhiteDB, number uint16, data []byte) error {
+func (r *Record) SetBytesField(d *Db, number uint16, data []byte) error {
 	if C.wg_set_str_field(d.db, r.rec, C.wg_int(number), (*C.char)(unsafe.Pointer(&data[0]))) != 0 {
 		return WDBError("Could not set field")
 	}
@@ -174,22 +219,22 @@ func (r *Record) SetByteField(d *WhiteDB, number uint16, data []byte) error {
 
 // Returns 0 when there was an error.
 // @TODO -- wrap this in better handling?
-func (r *Record) GetField(d *WhiteDB, number uint16) int64 {
+func (r *Record) GetField(d *Db, number uint16) int64 {
 	return int64(C.wg_get_field(d.db, r.rec, C.wg_int(number)))
 }
 
-func (r *Record) GetFieldType(d *WhiteDB, number uint16) int64 {
+func (r *Record) GetFieldType(d *Db, number uint16) int64 {
 	return int64(C.wg_get_field_type(d.db, r.rec, C.wg_int(number)))
 }
 
-func (r *Record) GetInt64Field(d *WhiteDB, number uint16) (int64, error) {
+func (r *Record) GetInt64Field(d *Db, number uint16) (int64, error) {
 	if r.GetFieldType(d, number) != INTTYPE {
 		return 0, WDBError("Not an int valued field")
 	}
 	return int64(C.wg_decode_int(d.db, C.wg_get_field(d.db, r.rec, C.wg_int(number)))), nil
 }
 
-func (r *Record) GetFloat64Field(d *WhiteDB, number uint16) (float64, error) {
+func (r *Record) GetFloat64Field(d *Db, number uint16) (float64, error) {
 	if r.GetFieldType(d, number) != DOUBLETYPE {
 		return 0, WDBError("Not an double valued field")
 	}
@@ -198,7 +243,7 @@ func (r *Record) GetFloat64Field(d *WhiteDB, number uint16) (float64, error) {
 
 // 0 Copy return.
 // @TODO -- make sure doesn't leak
-func (r *Record) GetByteField(d *WhiteDB, number uint16) ([]byte, error) {
+func (r *Record) GetBytesField(d *Db, number uint16) ([]byte, error) {
 	if r.GetFieldType(d, number) != STRTYPE {
 		return nil, WDBError("Not an string valued field")
 	}
@@ -215,7 +260,24 @@ func (r *Record) GetByteField(d *WhiteDB, number uint16) ([]byte, error) {
 	return goSlice, nil
 }
 
+////// Work with Transactions
+
+func (d *Db) GetWriteLock() int64 {
+	return int64(C.wg_start_write(d.db))
+}
+
+func (d *Db) EndWriteLock(lock int64) int64 {
+	return int64(C.wg_end_write(d.db, C.wg_int(lock)))
+}
+
+func (d *Db) GetReadLock() int64 {
+	return int64(C.wg_start_read(d.db))
+}
+
+func (d *Db) EndReadLock(lock int64) int64 {
+	return int64(C.wg_end_read(d.db, C.wg_int(lock)))
+}
+
 /**
-
-
+wg_encode_blob -- for bytes
 */
