@@ -9,9 +9,14 @@ import (
 	"whitedb"
 )
 
+const (
+	DB_SIZE = 2000000
+	DB_NAME = "6700"
+)
+
 func TestOpenClose(t *testing.T) {
 
-	db, err := whitedb.AttachDatabase("1000", 2000000)
+	db, err := whitedb.AttachDatabase(DB_NAME, DB_SIZE)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,19 +26,19 @@ func TestOpenClose(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 
-	db, err := whitedb.AttachDatabase("1000", 2000000)
+	db, err := whitedb.AttachDatabase(DB_NAME, DB_SIZE)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	db.DetatchDatabase()
-	if err = whitedb.DeleteDatabase("1000"); err != nil {
+	if err = whitedb.DeleteDatabase(DB_NAME); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestRecordCreateDelete(t *testing.T) {
-	db, err := whitedb.AttachDatabase("1000", 2000000)
+	db, err := whitedb.AttachDatabase(DB_NAME, DB_SIZE)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +67,7 @@ func TestRecordCreateDelete(t *testing.T) {
 }
 
 func TestRecordSet(t *testing.T) {
-	db, err := whitedb.AttachDatabase("1000", 2000000)
+	db, err := whitedb.AttachDatabase(DB_NAME, DB_SIZE)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +104,7 @@ func TestRecordSet(t *testing.T) {
 }
 
 func TestIntGetSet(t *testing.T) {
-	db, err := whitedb.AttachDatabase("1000", 2000000)
+	db, err := whitedb.AttachDatabase(DB_NAME, DB_SIZE)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +132,7 @@ func TestIntGetSet(t *testing.T) {
 }
 
 func TestFloat64GetSet(t *testing.T) {
-	db, err := whitedb.AttachDatabase("1000", 2000000)
+	db, err := whitedb.AttachDatabase(DB_NAME, DB_SIZE)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +160,7 @@ func TestFloat64GetSet(t *testing.T) {
 }
 
 func TestByteGetSet(t *testing.T) {
-	db, err := whitedb.AttachDatabase("1000", 2000000)
+	db, err := whitedb.AttachDatabase(DB_NAME, DB_SIZE)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,4 +186,44 @@ func TestByteGetSet(t *testing.T) {
 		}
 
 	}
+}
+
+func BenchmarkIntSet(b *testing.B) {
+	db, err := whitedb.AttachDatabase(DB_NAME, DB_SIZE)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	rec, err := db.CreateRecord(1)
+	if err != nil {
+		b.Fatal(err)
+	}
+	for i := 0; i < b.N; i++ {
+		if err := rec.SetInt64Field(db, 0, int64(i)); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	db.DetatchDatabase()
+	whitedb.DeleteDatabase(DB_NAME)
+}
+
+func BenchmarkByteSet(b *testing.B) {
+	db, err := whitedb.AttachDatabase(DB_NAME, DB_SIZE)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	rec, err := db.CreateRecord(1)
+	if err != nil {
+		b.Fatal(err)
+	}
+	for i := 0; i < b.N; i++ {
+		if err := rec.SetByteField(db, 0, []byte("testa")); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	db.DetatchDatabase()
+	whitedb.DeleteDatabase(DB_NAME)
 }
