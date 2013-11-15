@@ -125,3 +125,60 @@ func TestIntGetSet(t *testing.T) {
 		}
 	}
 }
+
+func TestFloat64GetSet(t *testing.T) {
+	db, err := whitedb.AttachDatabase("1000", 2000000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.DetatchDatabase()
+	vals := []float64{10.324, 3242.23423, 23423423.234234}
+
+	rec, err := db.CreateRecord(int64(len(vals)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i, v := range vals {
+		if err := rec.SetFloat64Field(db, uint16(i), v); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for i, v := range vals {
+		if vsave, err := rec.GetFloat64Field(db, uint16(i)); err != nil {
+			t.Fatal(err)
+		} else if v != vsave {
+			t.Errorf("Execting %d, got %d", v, vsave)
+		}
+	}
+}
+
+func TestByteGetSet(t *testing.T) {
+	db, err := whitedb.AttachDatabase("1000", 2000000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.DetatchDatabase()
+	vals := [][]byte{[]byte("dsfsdf"), []byte("234234sdfsdf"), []byte("sdfsdfsdfsdf")}
+
+	rec, err := db.CreateRecord(int64(len(vals)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i, v := range vals {
+		if err := rec.SetByteField(db, uint16(i), v); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for i, v := range vals {
+		if vsave, err := rec.GetByteField(db, uint16(i)); err != nil {
+			t.Fatal(err)
+		} else if string(v) != string(vsave) {
+			t.Errorf("Execting %s, got %s", string(v), string(vsave))
+		}
+
+	}
+}

@@ -12,6 +12,7 @@ package whitedb
 import "C"
 
 import (
+	"reflect"
 	"unsafe"
 )
 
@@ -195,15 +196,24 @@ func (r *Record) GetFloat64Field(d *WhiteDB, number uint16) (float64, error) {
 	return float64(C.wg_decode_double(d.db, C.wg_get_field(d.db, r.rec, C.wg_int(number)))), nil
 }
 
-/**
+// 0 Copy return.
+// @TODO -- make sure doesn't leak
 func (r *Record) GetByteField(d *WhiteDB, number uint16) ([]byte, error) {
-	if r.GetFieldType(d, number) != STRINGTYPE {
-		return 0, WDBError("Not an string valued field")
+	if r.GetFieldType(d, number) != STRTYPE {
+		return nil, WDBError("Not an string valued field")
 	}
 
-	return int64(C.wg_decode_int(d.db, C.wg_get_field(d.db, r.rec, C.wg_int(number)))), nil
+	enc := C.wg_get_field(d.db, r.rec, C.wg_int(number))
+	slen := int(C.wg_decode_str_len(d.db, enc))
+	sval := C.wg_decode_str(d.db, enc)
+
+	var goSlice []byte
+	sliceHeader := (*reflect.SliceHeader)((unsafe.Pointer(&goSlice)))
+	sliceHeader.Cap = slen
+	sliceHeader.Len = slen
+	sliceHeader.Data = uintptr(unsafe.Pointer(sval))
+	return goSlice, nil
 }
-*/
 
 /**
 
