@@ -12,6 +12,9 @@ package whitedb
 import "C"
 
 import (
+	"bytes"
+	"encoding/gob"
+	"fmt"
 	"reflect"
 	"unsafe"
 )
@@ -208,8 +211,27 @@ func (r *Record) SetFloat64Field(d *Db, number uint16, data float64) error {
 	return nil
 }
 
+// @TODO -- if data isn't null terminated, set as a blob field, not string.
 func (r *Record) SetBytesField(d *Db, number uint16, data []byte) error {
 	if C.wg_set_str_field(d.db, r.rec, C.wg_int(number), (*C.char)(unsafe.Pointer(&data[0]))) != 0 {
+		return WDBError("Could not set field")
+	}
+	return nil
+}
+
+// Takes anything, convert to gob for internal storage.
+func (r *Record) SetGobField(d *Db, number uint16, e interface{}) error {
+	var buffer bytes.Buffer
+	encoder := gob.NewEncoder(&buffer)
+	err := encoder.Encode(e)
+	if err != nil {
+		return WDBError(fmt.Sprintf("Failed to add a record: %v", err))
+	}
+
+	cKey := C.CString(reflect.TypeOf(e).String())
+	defer C.free(unsafe.Pointer(cKey))
+	enc := C.wg_encode_blob(d.db, (*C.char)(unsafe.Pointer(&(buffer.Bytes())[0])), cKey, C.wg_int(buffer.Len()))
+	if C.wg_set_field(d.db, r.rec, C.wg_int(number), enc) != 0 {
 		return WDBError("Could not set field")
 	}
 	return nil
@@ -258,6 +280,31 @@ func (r *Record) GetBytesField(d *Db, number uint16) ([]byte, error) {
 	sliceHeader.Len = slen
 	sliceHeader.Data = uintptr(unsafe.Pointer(sval))
 	return goSlice, nil
+}
+
+// Returns what you set as a gob.
+func (r *Record) GetGobField(d *Db, number uint16, e interface{}) error {
+	if r.GetFieldType(d, number) != BLOBTYPE {
+		return WDBError("Not an blob valued field")
+	}
+
+	enc := C.wg_get_field(d.db, r.rec, C.wg_int(number))
+	slen := int(C.wg_decode_blob_len(d.db, enc))
+	sval := C.wg_decode_blob(d.db, enc)
+
+	var goSlice []byte
+	sliceHeader := (*reflect.SliceHeader)((unsafe.Pointer(&goSlice)))
+	sliceHeader.Cap = slen
+	sliceHeader.Len = slen
+	sliceHeader.Data = uintptr(unsafe.Pointer(sval))
+
+	buffer := bytes.NewBuffer(goSlice)
+	decoder := gob.NewDecoder(buffer)
+
+	if err := decoder.Decode(e); err != nil {
+		return err
+	}
+	return nil
 }
 
 ////// Work with Transactions

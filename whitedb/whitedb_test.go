@@ -14,6 +14,11 @@ const (
 	DB_NAME = "6700"
 )
 
+type testkv struct {
+	Key   string
+	Value int
+}
+
 func TestOpenClose(t *testing.T) {
 
 	db, err := whitedb.AttachDatabase(DB_NAME, DB_SIZE)
@@ -245,7 +250,35 @@ func TestBytesGetSet(t *testing.T) {
 		} else if string(v) != string(vsave) {
 			t.Errorf("Execting %s, got %s", string(v), string(vsave))
 		}
+	}
+}
 
+func TestGobGetSet(t *testing.T) {
+	db, err := whitedb.AttachDatabase(DB_NAME, DB_SIZE)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.DetatchDatabase()
+	vals := []testkv{testkv{"sdfsd", 1}, testkv{"sfswergdcxvxcv", 2}, testkv{"345345345345sdfsd", 3}}
+
+	rec, err := db.CreateRecord(int64(len(vals)))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for i, v := range vals {
+		if err := rec.SetGobField(db, uint16(i), &v); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	for i, v := range vals {
+		tk := testkv{}
+		if err := rec.GetGobField(db, uint16(i), &tk); err != nil {
+			t.Fatal(err)
+		} else if v.Value != tk.Value {
+			t.Errorf("Execting %s, got %s", v.Value, tk.Value)
+		}
 	}
 }
 
